@@ -16,10 +16,9 @@ const MyWebView = () => {
     // return
     if(JSON.parse(event.nativeEvent.data).nullifier){
       const commitment = JSON.parse(event.nativeEvent.data)
-      console.log('Commitment from WebView:', commitment);
+      console.log('Commitment added to chain:', commitment);
       setCmt(commitment)
-
-    } // commitment wont give error proof will
+    } 
     else{
       console.log('Proof from WebView:', event.nativeEvent.data);
       setProof(JSON.parse(event.nativeEvent.data))
@@ -28,8 +27,8 @@ const MyWebView = () => {
 
   const genProof = () => {
     console.log("proof button pressed", cmt)
-      webViewRef.current.injectJavaScript(`window.postMessage(${JSON.stringify(cmt)}, "*");`);
-      return 
+    webViewRef.current.injectJavaScript(`window.postMessage(${JSON.stringify(cmt)}, "*");`);
+    return 
   }
   const genCommitment = () => {
     console.log("button pressed")

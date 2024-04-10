@@ -2,6 +2,7 @@ const { buildMimcSponge } = require("circomlibjs")
 const { BigNumber } = require("ethers")
 // const crypto = require("crypto")
 // const fs = require("fs")
+const ethers = require("ethers")
 const {MerkleTree} = require("merkletreejs")
 const snarkjs = require("snarkjs")
 const loadWebAssembly = require("./Verifier");
@@ -9,10 +10,10 @@ const loadWebAssembly = require("./Verifier");
 const randomBytes = require("random-bytes")
 
 module.exports = {generateCommitment, addCommitment, generateAndVerifyProof, getFileNames}
- async function generateCommitment() {
+async function generateCommitment() {
     const mimc = await buildMimcSponge();
-    const nullifier = BigNumber.from(randomBytes.sync(31)).toString();
-    const secret = BigNumber.from(randomBytes.sync(31)).toString();
+    const nullifier = ethers.toBigInt(randomBytes.sync(31)).toString();
+    const secret = ethers.toBigInt(randomBytes.sync(31)).toString();
     const commitment = mimc.F.toString(mimc.multiHash([nullifier, secret]));
     const nullifierHash = mimc.F.toString(mimc.multiHash([nullifier]));
     return {
@@ -85,6 +86,22 @@ const zeros = [
     '11544818037702067293688063426012553693851444915243122674915303779243865603077',
     '18926336163373752588529320804722226672465218465546337267825102089394393880276'
 ]
+function convertCallData(calldata) {
+    const argv = calldata
+        .replace(/["[\]\s]/g, "")
+        .split(",")
+        .map((x) => BigInt(x).toString());
+
+    const a = [argv[0], argv[1]];
+    const b = [
+        [argv[2], argv[3]],
+        [argv[4], argv[5]],
+    ]
+    const c = [argv[6], argv[7]]
+    const input = [argv[8], argv[9]]
+
+    return { a, b, c, input };
+}
  function calculateMerkleRootAndPathFromTree(mimc, elements, element=undefined) {
     //   const zeros = generateZeros(mimc, 20);
     
@@ -200,12 +217,52 @@ const zeros = [
 //     '11544818037702067293688063426012553693851444915243122674915303779243865603077',
 //     '18926336163373752588529320804722226672465218465546337267825102089394393880276'
 // ]
-const ZERO_VALUE = '21663839004416932945382355908790599225266501822907911457504978515578255421292' // = keccak256("tornado") % FIELD_SIZE
- async function generateAndVerifyProof(commitments, commitment){
+async function calculateMerkleRootAndPath(levels, elements, element = undefined) {
+    const capacity = 2 ** levels
+    if (elements.length > capacity) throw new Error('Tree is full')
     const mimc = await buildMimcSponge()
-    const rootAndPath = calculateMerkleRootAndPath(mimc, commitments, commitment.commitment)
+
+    let layers = []
+    layers[0] = elements.slice()
+    for (let level = 1; level <= levels; level++) {
+        layers[level] = []
+        for (let i = 0; i < Math.ceil(layers[level - 1].length / 2); i++) {
+            layers[level][i] = mimc.F.toString(mimc.multiHash([
+                layers[level - 1][i * 2],
+                i * 2 + 1 < layers[level - 1].length ? layers[level - 1][i * 2 + 1] : zeros[level - 1]]))
+        }
+    }
+    // console.log(layers)
+    const root = layers[levels].length > 0 ? layers[levels][0] : zeros[levels - 1]
+    console.log("root 1: ", root)
+    let pathElements = []
+    let pathIndices = []
+
+    if (element) {
+        let index = layers[0].findIndex(e => e === element)
+        if (index === -1) {
+            return false
+        }
+        console.log('idx: ' + index)
+        for (let level = 0; level < levels; level++) {
+            pathIndices[level] = index % 2
+            pathElements[level] = (index ^ 1) < layers[level].length ? layers[level][index ^ 1] : zeros[level]
+            index >>= 1
+        }
+        return {
+            root: root,
+            pathElements: pathElements.map((v) => v.toString()),
+            pathIndices: pathIndices.map((v) => v.toString())
+        }
+    }
+    return root
+}
+const ZERO_VALUE = '21663839004416932945382355908790599225266501822907911457504978515578255421292' // = keccak256("tornado") % FIELD_SIZE
+async function generateAndVerifyProof(commitments, commitment, zkey) {
+    const mimc = await buildMimcSponge()
+    const rootAndPath = await calculateMerkleRootAndPath(20, commitments, commitment.commitment)
     console.log("got root and path")
-    if(!rootAndPath){
+    if (!rootAndPath) {
         return "commitment not found in tree"
     }
     console.log("proving...")
@@ -215,25 +272,16 @@ const ZERO_VALUE = '216638390044169329453823559087905992252665018229079114575049
             pathElements: rootAndPath.pathElements, pathIndices: rootAndPath.pathIndices
         },
         getVerifierWASM(),
-        "keys/Verifier.zkey"
+        zkey    // has to be path to zkey
     )
-    console.log("generated proof")
-    const vKey = JSON.parse(await fs.promises.readFile("verification_key.json"));
-    const result = await snarkjs.groth16.verify(vKey, publicSignals, proof)
-    // const rootsPath = await downloadFile("merkle-tree-roots")
-    const roots = (await fs.promises.readFile("google-cloud-downloads/merkle-tree-roots", "utf-8")).split(", ")   // array of roots
-    console.log("got roots")
-    // const nullifierPath = await downloadFile("merkle-tree-nullifiers")
-    const nullifiers = (await fs.promises.readFile("google-cloud-downloads/merkle-tree-nullifiers", "utf-8")).split(", ") //array of nullifiers
-    console.log("got nullifiers")
-    console.log(roots, nullifiers)
-    const verification = result && roots.includes(rootAndPath.root) && !nullifiers.includes(publicSignals[0])
-    console.log("veriication: ", verification)
-    if(verification){
-        await fs.promises.appendFile("google-cloud-downloads/merkle-tree-nullifiers", `, ${publicSignals[0]}`, "utf-8")
-        console.log("added nullifier to nullifiers")
+    const cd = convertCallData(await snarkjs.groth16.exportSolidityCallData(proof, publicSignals));
+    return {
+        nullifierHash: publicSignals[0],
+        root: publicSignals[1],
+        proof_a: cd.a,
+        proof_b: cd.b,
+        proof_c: cd.c
     }
-    return verification
 }
 function getVerifierWASM() {
     return loadWebAssembly().buffer
@@ -246,62 +294,355 @@ async function getFileNames() {
   
     return files.map((file)=>file.name)
 }
-const commit = {
-    nullifier: '111349953466719989243906941048020559888811156216844216544120607592577570276',
-    secret: '177404289777893950706913781210648849388432230155929810276013660982502117893',
-    commitment: '20539840102084173672720376236311644979114408941439941380449889070514975362476',
-    nullifierHash: '7033279973534485390054106249101078054990397698456843890672433609810854955414'
-  }
-  const commitments = [
-    '3074190342867402412803557807548512753351931287425616616615694159627619459796',
-    '13475734987955409508831930366033861424499880999643234370054472513856813003861',
-    '3570018771868692456828873706585525328485135637926069150054527369990798584485',
-    '13244071377964847929013576029891240082065845419569340850863441307007392748990',
-    '16710235732993465992487231178282297497813896154244530876020033947719032629361',
-    '14348676744880833669579290369983086492355941367956776279902383530742703420634',
-    '14925625901959931552215110479845178333793803299312370211203726595996545990330',
-    '18390238942998778163527654279427157300038336451599407278489194361468382844673',
-    '20539840102084173672720376236311644979114408941439941380449889070514975362476',
-    '12233898094200114006799166812068658109872056832829339818905505551960125275570'
-  ]
+
 const t = async()=>{
-    // const commitments = []
+    const SPcontractAddress = "0xa8dBc444C5e573e5cD3A3Bd004DC9B44bCf96F07"
+    const AyalaAddress = "0xBaa107d8707966589254aDA3774c86a984958A3F"
+    const provider = new ethers.JsonRpcProvider("https://polygon-mumbai.g.alchemy.com/v2/5hmudZ-Nalv--bEN3KMKHtxZKzklAua1")
+    const ABI = [
+        {
+            "inputs": [
+                {
+                    "internalType": "uint32",
+                    "name": "_levels",
+                    "type": "uint32"
+                },
+                {
+                    "internalType": "contract IHasher",
+                    "name": "_hasher",
+                    "type": "address"
+                },
+                {
+                    "internalType": "contract IVerifier",
+                    "name": "_verifier",
+                    "type": "address"
+                },
+                {
+                    "internalType": "contract IMetadata",
+                    "name": "_metadataContract",
+                    "type": "address"
+                },
+                {
+                    "internalType": "contract IServiceProviders",
+                    "name": "_spsContract",
+                    "type": "address"
+                },
+                {
+                    "internalType": "contract IPalo",
+                    "name": "_fundsContract",
+                    "type": "address"
+                },
+                {
+                    "internalType": "contract IAyala",
+                    "name": "_ayalaContract",
+                    "type": "address"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_serviceProviderENS",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_metaData",
+                    "type": "string"
+                }
+            ],
+            "stateMutability": "payable",
+            "type": "constructor"
+        },
+        {
+            "inputs": [],
+            "name": "INDEX_OF_METADATA",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "SERVICE_PROVIDER_ENS",
+            "outputs": [
+                {
+                    "internalType": "string",
+                    "name": "",
+                    "type": "string"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_productID",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_setupFee",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_monthlyFee",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_metaData",
+                    "type": "string"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_productType",
+                    "type": "uint256"
+                }
+            ],
+            "name": "addProduct",
+            "outputs": [],
+            "stateMutability": "payable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_commitmentDeposit",
+                    "type": "uint256"
+                }
+            ],
+            "name": "createCommitmentToRegisterENS",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_commitmentDeposit",
+                    "type": "uint256"
+                }
+            ],
+            "name": "createSubscription",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[2]",
+                    "name": "_proof_a",
+                    "type": "uint256[2]"
+                },
+                {
+                    "internalType": "uint256[2][2]",
+                    "name": "_proof_b",
+                    "type": "uint256[2][2]"
+                },
+                {
+                    "internalType": "uint256[2]",
+                    "name": "_proof_c",
+                    "type": "uint256[2]"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_nullifierHash",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_root",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_productIDHash",
+                    "type": "uint256"
+                }
+            ],
+            "name": "endSubscription",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_productID",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getProductMetaData",
+            "outputs": [
+                {
+                    "internalType": "string",
+                    "name": "",
+                    "type": "string"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "ens",
+                    "type": "string"
+                }
+            ],
+            "name": "getRemainingSubscriptionUserTime",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getServiceProviderMetadata",
+            "outputs": [
+                {
+                    "internalType": "string",
+                    "name": "",
+                    "type": "string"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[2]",
+                    "name": "_proof_a",
+                    "type": "uint256[2]"
+                },
+                {
+                    "internalType": "uint256[2][2]",
+                    "name": "_proof_b",
+                    "type": "uint256[2][2]"
+                },
+                {
+                    "internalType": "uint256[2]",
+                    "name": "_proof_c",
+                    "type": "uint256[2]"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_nullifierHash",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_root",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_productIDHash",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "string",
+                    "name": "ens",
+                    "type": "string"
+                }
+            ],
+            "name": "startSubscription",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[2]",
+                    "name": "_proof_a",
+                    "type": "uint256[2]"
+                },
+                {
+                    "internalType": "uint256[2][2]",
+                    "name": "_proof_b",
+                    "type": "uint256[2][2]"
+                },
+                {
+                    "internalType": "uint256[2]",
+                    "name": "_proof_c",
+                    "type": "uint256[2]"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_nullifierHash",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_root",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_userProduct",
+                    "type": "string"
+                }
+            ],
+            "name": "updateNewServiceProvider",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        }
+        ]
+    const signer = new ethers.Wallet("0x0dbc2427bcc0c03b4d7568f0ac135b543633c237d06837e8ff6dabc8ca69b3ae", provider)
+    const SPcontract = new ethers.Contract(SPcontractAddress, ABI, signer)
+    const abi = [
+        "event Commit(bytes32 indexed commitment,uint32 leafIndex,uint256 timestamp)"
+    ];
+    const cmt = await generateCommitment()
+    const tx = await SPcontract.createCommitmentToRegisterENS(cmt.commitment)
+    console.log(cmt)
+    await tx.wait()
+    console.log("added commitment")
+    const Ayala = new ethers.Contract(AyalaAddress, abi, provider)
+    const events = await Ayala.queryFilter(Ayala.filters.Commit())
+    console.log(events)
+    let commitments = []
+    for (let event of events) {
+        commitments.push(ethers.toBigInt(event.args.commitment).toString())
+    }
+    console.log(commitments)
+    return commitments
+    // const commitments = []   0dbc2427bcc0c03b4d7568f0ac135b543633c237d06837e8ff6dabc8ca69b3ae
     // const roots = []
+    // let cmt;
     // for(let i = 0;i<10;i++){
     //     const commitment = await generateCommitment()
     //     const mimc = await buildMimcSponge()
     //     console.log(commitment)
     //     commitments.push(commitment.commitment)
-    //     const root = calculateMerkleRootAndPath(mimc, commitments)
+    //     const root = await calculateMerkleRootAndPath(20, commitments)
     //     roots.push(root)
+    //     cmt = commitment
     // }
 
-    console.log(commitments)
-    fetch("http://localhost:8082/")  
-            .then(response => {
-                // document.querySelector("#error").textContent =  "kdjvjfqwevyfwhjy"
-                // return
-                // document.querySelector("#error").textContent = JSON.stringify(response)
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.blob();
-            })
-            .then(async(blob) => {
-                // Create a temporary link element
-                // const url = window.URL.createObjectURL(blob);
-                // const proof = await generateAndVerifyProof(commitments, commit, url)
-                console.log(blob)
-                return 
-                
-            })
-            .catch(error => {
-                console.error('There was a problem with your fetch operation:', error);
-                // document.querySelector("#error").textContent = JSON.stringify({
-                //         message: error.message,
-                //         stack: error.stack
-                //     });
-            });
-    // const proof = await calculateMerkleRootAndPath(20, commitments, commit.commitment)
+    // console.log(commitments)
+    // console.log(roots)
+
+    // const proof = await generateAndVerifyProof(commitments, cmt, "./assets/Verifier.zkey")
+    // console.log(proof)
 }
 t()

@@ -13,6 +13,7 @@
     "circomlibjs": "^0.1.7",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
+    "ethers": "^6.11.1",
     "express": "^4.19.2",
     "ffjavascript": "^0.2.63",
     "merkletreejs": "^0.3.11",
