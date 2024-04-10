@@ -10,8 +10,18 @@
     "test": "jest"
   },
   "dependencies": {
+    "circomlibjs": "^0.1.7",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "express": "^4.19.2",
+    "ffjavascript": "^0.2.63",
+    "merkletreejs": "^0.3.11",
+    "path": "^0.12.7",
+    "random-bytes": "^1.0.0",
     "react": "18.2.0",
-    "react-native": "0.73.6"
+    "react-native": "0.73.6",
+    "react-native-webview": "^13.8.4",
+    "snarkjs": "^0.7.3"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

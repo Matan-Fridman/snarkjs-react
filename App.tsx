@@ -1,118 +1,59 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+import React, { useRef, useState } from 'react';
+import { Button, Text, View } from 'react-native';
+import {WebView} from "react-native-webview"
+import HTML from "./public/test.html"
+const MyWebView = () => {
+  const webViewRef = useRef(null);
+  const [cmt, setCmt] = useState({nullifier:"", commitment:"", nullifierHash: "", secret:""})
+  const [proof, setProof] = useState({root:"", pathIndices:[], pathElements: []})
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+  // Function to handle messages received from WebView
+  const handleMessage = (event) => {
+    console.log("data:", event.nativeEvent.data)
+    if(event.nativeEvent.data === undefined || event.nativeEvent.data === "data received:"){
+      return
+    }
+    // return
+    if(JSON.parse(event.nativeEvent.data).nullifier){
+      const commitment = JSON.parse(event.nativeEvent.data)
+      console.log('Commitment from WebView:', commitment);
+      setCmt(commitment)
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+    } // commitment wont give error proof will
+    else{
+      console.log('Proof from WebView:', event.nativeEvent.data);
+      setProof(JSON.parse(event.nativeEvent.data))
+    }
+  }
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
-
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  const genProof = () => {
+    console.log("proof button pressed", cmt)
+      webViewRef.current.injectJavaScript(`window.postMessage(${JSON.stringify(cmt)}, "*");`);
+      return 
+  }
+  const genCommitment = () => {
+    console.log("button pressed")
+    webViewRef.current.injectJavaScript(`window.postMessage("test", "*");`);
+  }
   return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
+    <View style={{ flex: 1 }}>
+      <Text>Nullifier: {cmt.nullifier}</Text>
+      <Text>commitment: {cmt.commitment}</Text>
+      <Text>nullifierHash: {cmt.nullifierHash}</Text>
+      <Text>secret: {cmt.secret}</Text>
+      <Button title="Generate commitment" onPress={genCommitment}/>
+      <Text>Root: {proof.root}</Text>
+      <Text>Indices: {proof.pathIndices}</Text>
+      <Text>Elements: {proof.pathElements}</Text>
+      <Button title="Generate proof" onPress={genProof}/>
+      <WebView
+        ref={webViewRef}
+        source={HTML} // URL of the server serving the HTML file
+        onMessage={handleMessage}
+      />
+      <Text>Hello</Text>
     </View>
   );
-}
+};
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
-
-export default App;
+export default MyWebView;
