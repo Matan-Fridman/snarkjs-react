@@ -30,6 +30,9 @@ const MyWebView = () => {
     webViewRef.current.injectJavaScript(`window.postMessage(${JSON.stringify(cmt)}, "*");`);
     return 
   }
+  const verifyProof = () =>{
+    console.log("verifying")
+  }
   const genCommitment = () => {
     console.log("button pressed")
     webViewRef.current.injectJavaScript(`window.postMessage("test", "*");`);
@@ -45,6 +48,7 @@ const MyWebView = () => {
       <Text>Indices: {proof.pathIndices}</Text>
       <Text>Elements: {proof.pathElements}</Text>
       <Button title="Generate proof" onPress={genProof}/>
+      <Button title="Verify proof" onPress={verifyProof}/>
       <WebView
         ref={webViewRef}
         source={HTML} // URL of the server serving the HTML file
