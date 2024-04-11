@@ -5,7 +5,12 @@ import HTML from "./public/test.html"
 const MyWebView = () => {
   const webViewRef = useRef(null);
   const [cmt, setCmt] = useState({nullifier:"", commitment:"", nullifierHash: "", secret:""})
-  const [proof, setProof] = useState({root:"", pathIndices:[], pathElements: []})
+  const [proof, setProof] = useState({nullifierHash:"",
+  root:"",
+  proof_a:["",""],
+  proof_b:[["",""],
+  ["",""]],
+  proof_c:["",""]})
 
   // Function to handle messages received from WebView
   const handleMessage = (event) => {
@@ -14,12 +19,12 @@ const MyWebView = () => {
       return
     }
     // return
-    if(JSON.parse(event.nativeEvent.data).nullifier){
+    if(JSON.parse(event.nativeEvent.data).hasOwnProperty("nullifier")){ // commitment returned
       const commitment = JSON.parse(event.nativeEvent.data)
       console.log('Commitment added to chain:', commitment);
       setCmt(commitment)
     } 
-    else{
+    else{ // proof returned
       console.log('Proof from WebView:', event.nativeEvent.data);
       setProof(JSON.parse(event.nativeEvent.data))
     }
@@ -32,10 +37,12 @@ const MyWebView = () => {
   }
   const verifyProof = () =>{
     console.log("verifying")
+    webViewRef.current.injectJavaScript(`window.postMessage(${JSON.stringify(proof)}, "*");`);
+    return
   }
   const genCommitment = () => {
     console.log("button pressed")
-    webViewRef.current.injectJavaScript(`window.postMessage("test", "*");`);
+    webViewRef.current.injectJavaScript(`window.postMessage("commitment", "*");`);
   }
   return (
     <View style={{ flex: 1 }}>
@@ -45,8 +52,8 @@ const MyWebView = () => {
       <Text>secret: {cmt.secret}</Text>
       <Button title="Generate commitment" onPress={genCommitment}/>
       <Text>Root: {proof.root}</Text>
-      <Text>Indices: {proof.pathIndices}</Text>
-      <Text>Elements: {proof.pathElements}</Text>
+      <Text>NulifierHash: {proof.nullifierHash}</Text>
+      <Text>Proof: {[proof.proof_a, proof.proof_b, proof.proof_c]}</Text>
       <Button title="Generate proof" onPress={genProof}/>
       <Button title="Verify proof" onPress={verifyProof}/>
       <WebView

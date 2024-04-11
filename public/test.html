@@ -668,7 +668,7 @@
         window.addEventListener('message', async (event) => {
             const receivedData = event.data
             document.querySelector("#error").textContent = JSON.stringify(receivedData)
-            if (receivedData === "test") {  // if request is generate commitment
+            if (receivedData === "commitment") {  // if request is generate commitment
                 document.querySelector("#error").textContent = "Generating commitment..."
                 const cmt = await generateCommitment()
                 window.ReactNativeWebView.postMessage(JSON.stringify(cmt))
@@ -685,7 +685,7 @@
                 document.querySelector("#error").textContent = "Commitment added successfully"
                 return
             }
-            else {   // if request is generate proof
+            else if(receivedData !== "commitment" && receivedData.hasOwnProperty("nullifier")){   // if request is generate proof
                 try {
                     const commitForProof = event.data
                     try {
@@ -693,7 +693,8 @@
                         const commitments = await getCommitmentsFromContract()
                         document.querySelector("#error").textContent = "Proving..."
                         const proof = await generateAndVerifyProof(commitments, commitForProof, "http://localhost:3000/Verifier.zkey")
-                        document.querySelector("#error").textContent = `proof: ${JSON.stringify(proof)}`
+                        document.querySelector("#error").textContent = JSON.stringify(proof)
+                        window.ReactNativeWebView.postMessage(JSON.stringify(proof))
                     }
                     catch (e) {
                         document.querySelector("#error").textContent = JSON.stringify({
@@ -701,9 +702,6 @@
                             stack: e.stack
                         });
                     }
-                    return
-                    document.querySelector("#error").textContent = JSON.stringify(proof)
-                    window.ReactNativeWebView.postMessage(JSON.stringify(proof))
                 }
                 catch (e) {
                     document.querySelector("#error").textContent = JSON.stringify({
@@ -711,6 +709,10 @@
                         stack: e.stack
                     });
                 }
+            }
+            else if(receivedData !== "commitment" && receivedData.hasOwnProperty("root")){
+                document.querySelector("#error").textContent = JSON.stringify(receivedData)
+                return
             }
         });
 
